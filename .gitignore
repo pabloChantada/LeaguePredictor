@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Dataset: ~9 GB de JSON crudos, no versionar
+riot_dataset/
+
+# Modelos entrenados: regenerables con train.py, no se versionan...
+models/*.joblib
+models/*.pt
+# ...salvo el que se sirve en vivo (140 KB). Va al repo a proposito: el modo en
+# vivo no necesita API key, asi que con esto el repo funciona nada mas clonar.
+!models/modelo_baseline.joblib
+.env
+.agents
+.claude

@@ -1,0 +1,17 @@
+# Pipeline principal
+requests
+python-dotenv
+pandas
+numpy
+# Fijada: el repo distribuye models/modelo_baseline.joblib, y un pickle de
+# sklearn cargado con otra version avisa (InconsistentVersionWarning) o falla.
+scikit-learn==1.9.0
+joblib
+matplotlib
+
+# Dashboard en vivo
+streamlit
+
+# Solo para experiments/train_lstm.py (aparcado). Instalar aparte con:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# torch
