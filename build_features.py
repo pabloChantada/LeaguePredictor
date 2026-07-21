@@ -1,62 +1,63 @@
 """
-Construye la tabla de features TEMPORAL (una fila por minuto) para la baseline.
+Builds the TEMPORAL feature table (one row per minute) for the baseline.
 
-Lee los match JSON de riot_dataset/matches/, descarga (y cachea) el timeline de
-cada uno y, para cada minuto de la partida, escribe una fila con el estado del
-juego a ese minuto (features en diferencia, perspectiva azul), el minuto como
-feature, deltas de momentum (cambio en los ultimos DELTA_WINDOW min) y el target
-blue_win. El match_id se guarda para poder partir train/test POR PARTIDA.
+Reads the match JSON files from riot_dataset/matches/, loads (and caches) the
+timeline of each one and, for every minute of the match, writes a row with the
+game state at that minute (features as differences, blue perspective), the minute
+as a feature, momentum deltas (change over the last DELTA_WINDOW min) and the
+target blue_win. The match_id is stored so we can split train/test PER MATCH.
 
-Reutiliza la key + el limitador de crawler.py. Reanudable: los timelines se cachean
-en disco, asi que relanzarlo no vuelve a descargar lo ya bajado.
+Reuses the key + rate limiter from crawler.py. Resumable: timelines are cached on
+disk, so re-running it does not re-download what was already fetched.
 """
 import os
 import sys
 import csv
 import json
 
-import crawler  # solo por las rutas del dataset (RAW_DIR / TIMELINE_DIR / RANKS_CSV)
+import crawler  # only for the dataset paths (RAW_DIR / TIMELINE_DIR / RANKS_CSV)
 
-MINUTE_START = 5    # primer minuto que emitimos (antes es demasiado ruido)
-MINUTE_STEP = 1     # cada cuantos minutos emitimos una fila
-DELTA_WINDOW = 5    # ventana para las features de momentum (cambio en N min)
+MINUTE_START = 5    # first minute we emit (before that it is too noisy)
+MINUTE_STEP = 1     # every how many minutes we emit a row
+DELTA_WINDOW = 5    # window for the momentum features (change over N min)
 
 RAW_DIR = crawler.RAW_DIR
 OUT_DIR = crawler.OUT_DIR
-TIMELINE_DIR = crawler.TIMELINE_DIR   # lo llena crawler.py; aqui solo se lee
+TIMELINE_DIR = crawler.TIMELINE_DIR   # filled by crawler.py; here it is only read
 FEATURES_CSV = os.path.join(OUT_DIR, "features.csv")
 
-# tipos de monstruo elite (monsterType en ELITE_MONSTER_KILL)
+# elite monster types (monsterType in ELITE_MONSTER_KILL)
 DRAGON = "DRAGON"
 HERALD = "RIFTHERALD"
 BARON = "BARON_NASHOR"
 GRUB = "HORDE"  # void grubs
-# tipos de edificio (buildingType en BUILDING_KILL)
+# building types (buildingType in BUILDING_KILL)
 TOWER = "TOWER_BUILDING"
 INHIB = "INHIBITOR_BUILDING"
 
-# roles: teamPosition de Riot -> clave corta (orden fijo para columnas estables)
+# roles: Riot's teamPosition -> short key (fixed order for stable columns)
 ROLE_MAP = {"TOP": "TOP", "JUNGLE": "JGL", "MIDDLE": "MID",
             "BOTTOM": "BOT", "UTILITY": "SUP"}
 ROLES = ["TOP", "JGL", "MID", "BOT", "SUP"]
 
-# TODO(escalado): meter identidad de campeon via escalado de comp (scaling_diff).
-# Scaffold ya listo en make_scaling_table.py + champion_scaling.csv (a curar a mano).
-# Descartado de momento: con valores placeholder no movia el AUC. Reconsiderar solo
-# si el modelo se estanca; probar entonces la interaccion scaling_diff * minute.
+# TODO(scaling): add champion identity via comp scaling (scaling_diff).
+# Scaffold already in place in make_scaling_table.py + champion_scaling.csv (to be
+# curated by hand). Dropped for now: with placeholder values it did not move the
+# AUC. Reconsider only if the model stalls; then try the interaction scaling_diff * minute.
 
-# de estas calculamos delta de momentum.
-# cs/level incluidos porque SI son calculables en vivo (Live Client Data da
-# creepScore y level; oro y xp exactos NO) -> permiten un modelo live-compatible.
+# from these we compute the momentum delta.
+# cs/level included because they ARE computable live (Live Client Data gives
+# creepScore and level; exact gold and xp are NOT) -> they allow a live-compatible model.
 DELTA_BASE = ["gold_diff", "xp_diff", "kills_diff", "cs_diff", "level_diff"]
 
 
 def get_timeline(match_id):
-    """Timeline del match desde disco. None si no esta.
+    """Match timeline from disk. None if it is not there.
 
-    NO descarga: bajarlos es tarea de crawler.py, que guarda match y timeline en
-    la misma pasada. Asi este script es puro disco -> CSV: determinista,
-    reejecutable y sin depender de la API key ni del rate limiter.
+    Does NOT download: fetching them is crawler.py's job, which saves match and
+    timeline in the same pass. This keeps this script pure disk -> CSV:
+    deterministic, re-runnable and with no dependency on the API key or the rate
+    limiter.
     """
     path = os.path.join(TIMELINE_DIR, f"{match_id}.json")
     if not os.path.exists(path):
@@ -65,26 +66,26 @@ def get_timeline(match_id):
         return json.load(f)
 
 
-# La banda de elo la registra el crawler (es quien sabe de que tier salio cada
-# semilla); aqui solo se lee. Las partidas de crawls antiguos no tienen fila y
-# salen como UNKNOWN -> train.load_dataset las descarta.
+# The elo band is recorded by the crawler (it is the one that knows which tier each
+# seed came from); here it is only read. Matches from old crawls have no row and
+# come out as UNKNOWN -> train.load_dataset discards them.
 load_ranks = crawler.load_ranks
 
 
 def snapshot(pid_team, role_pairs, frames, minute):
-    """Estado del juego (features en diferencia) al minuto dado.
+    """Game state (features as differences) at the given minute.
 
-    role_pairs: {clave_rol: {"blue": pid, "red": pid}} para los diffs por posicion.
+    role_pairs: {role_key: {"blue": pid, "red": pid}} for the per-position diffs.
     """
     pf_by_pid = {int(k): v for k, v in frames[minute]["participantFrames"].items()}
 
-    # --- economia por equipo en el frame del minuto (oro / xp / cs) ---
+    # --- per-team economy in the minute's frame (gold / xp / cs) ---
     blue_gold = red_gold = blue_xp = red_xp = blue_cs = red_cs = 0
-    blue_level = red_level = 0  # nivel: proxy de xp que SI existe en vivo
-    # championStats/damageStats. OJO: medidos en el modelo dieron -0.001 de AUC
-    # (parecian ortogonales al oro, pero no lo son al set completo: correlacionan
-    # con level/xp/tiempo). NO entran a FEATURES en train.py; se siguen
-    # calculando solo para tenerlos disponibles en el EDA. Ver TODO alli.
+    blue_level = red_level = 0  # level: an xp proxy that DOES exist live
+    # championStats/damageStats. NOTE: measured in the model they gave -0.001 AUC
+    # (they looked orthogonal to gold, but they are not orthogonal to the full set:
+    # they correlate with level/xp/time). They do NOT enter FEATURES in train.py;
+    # they are still computed only to have them available in the EDA. See the TODO there.
     team_extra = {100: {}, 200: {}}
     for pid, pf in pf_by_pid.items():
         team = pid_team.get(pid)
@@ -104,7 +105,7 @@ def snapshot(pid_team, role_pairs, frames, minute):
                              ("dmg_champs", dst.get("totalDamageDoneToChampions", 0))):
                 team_extra[team][key] = team_extra[team].get(key, 0) + val
 
-    # --- diffs por rol (oro/xp): cuanto mas farmeado va NUESTRO rol que el suyo ---
+    # --- per-role diffs (gold/xp): how much more farmed OUR role is than theirs ---
     role_feats = {}
     for rk in ROLES:
         pair = role_pairs.get(rk, {})
@@ -112,11 +113,11 @@ def snapshot(pid_team, role_pairs, frames, minute):
         if b in pf_by_pid and r in pf_by_pid:
             role_feats[f"gold_diff_{rk}"] = pf_by_pid[b].get("totalGold", 0) - pf_by_pid[r].get("totalGold", 0)
             role_feats[f"xp_diff_{rk}"] = pf_by_pid[b].get("xp", 0) - pf_by_pid[r].get("xp", 0)
-        else:  # rol sin asignar (autofill/remake) -> 0
+        else:  # unassigned role (autofill/remake) -> 0
             role_feats[f"gold_diff_{rk}"] = 0
             role_feats[f"xp_diff_{rk}"] = 0
 
-    # --- eventos acumulados hasta el minuto (kills / estructuras / objetivos) ---
+    # --- events accumulated up to the minute (kills / structures / objectives) ---
     blue_kills = red_kills = blue_towers = red_towers = blue_inhibs = red_inhibs = 0
     blue_drakes = red_drakes = blue_heralds = red_heralds = 0
     blue_barons = red_barons = blue_grubs = red_grubs = 0
@@ -128,7 +129,7 @@ def snapshot(pid_team, role_pairs, frames, minute):
                 if team == 100: blue_kills += 1
                 elif team == 200: red_kills += 1
             elif etype == "BUILDING_KILL":
-                owner = e.get("teamId")  # equipo dueño -> la derriba el contrario
+                owner = e.get("teamId")  # owning team -> the other one takes it down
                 btype = e.get("buildingType")
                 if btype == TOWER:
                     if owner == 200: blue_towers += 1
@@ -171,21 +172,21 @@ def snapshot(pid_team, role_pairs, frames, minute):
     return feats
 
 
-def rows_for_match(match, timeline, rango=("UNKNOWN", "")):
-    """Una lista de filas (una por minuto) para una partida, con deltas de momentum."""
+def rows_for_match(match, timeline, band=("UNKNOWN", "")):
+    """A list of rows (one per minute) for a match, with momentum deltas."""
     info = match["info"]
     pid_team = {p["participantId"]: p["teamId"] for p in info["participants"]}
     blue_win = 1 if any(t["teamId"] == 100 and t["win"] for t in info["teams"]) else 0
     match_id = match["metadata"]["matchId"]
-    # parche mayor (p.ej. "16.13") para poder cortar por version en el EDA
+    # major patch (e.g. "16.13") so we can slice by version in the EDA
     patch = ".".join(info.get("gameVersion", "").split(".")[:2])
-    # Cola de la partida. IMPRESCINDIBLE: el crawler baja TODAS las colas de cada
-    # jugador (match-v5 by-puuid/ids no filtra), asi que aqui entran Arena, co-op
-    # vs IA, ARAM... que NO son el problema que modelamos. train.load_dataset()
-    # filtra por esto. Ver QUEUE_SOLOQ en train.py.
+    # Match queue. ESSENTIAL: the crawler downloads ALL queues of each player
+    # (match-v5 by-puuid/ids does not filter), so Arena, co-op vs AI, ARAM... which
+    # are NOT the problem we model, all get in here. train.load_dataset() filters
+    # on this. See QUEUE_SOLOQ in train.py.
     queue_id = info.get("queueId")
 
-    # mapa rol -> {"blue": pid, "red": pid} desde teamPosition
+    # role -> {"blue": pid, "red": pid} map from teamPosition
     role_pairs = {}
     for p in info["participants"]:
         rk = ROLE_MAP.get(p.get("teamPosition"))
@@ -197,16 +198,16 @@ def rows_for_match(match, timeline, rango=("UNKNOWN", "")):
     frames = timeline["info"]["frames"]
     last = len(frames) - 1
     if last < MINUTE_START:
-        return []  # partida mas corta que el primer minuto que emitimos
+        return []  # match shorter than the first minute we emit
 
-    # snapshot por minuto, indexado por minuto para calcular deltas
+    # snapshot per minute, indexed by minute so we can compute deltas
     snaps = {m: snapshot(pid_team, role_pairs, frames, m)
              for m in range(MINUTE_START, last + 1, MINUTE_STEP)}
 
     rows = []
     for m, snap in snaps.items():
         row = {"match_id": match_id, "queue_id": queue_id,
-               "tier": rango[0], "division": rango[1], "patch": patch,
+               "tier": band[0], "division": band[1], "patch": patch,
                "minute": m, "blue_win": blue_win}
         row.update(snap)
         prev = snaps.get(m - DELTA_WINDOW)
@@ -219,9 +220,9 @@ def rows_for_match(match, timeline, rango=("UNKNOWN", "")):
 def build():
     files = [f for f in os.listdir(RAW_DIR) if f.endswith(".json")]
     ranks = load_ranks()
-    print(f"{len(files)} matches en disco, {len(ranks)} con banda de elo registrada")
+    print(f"{len(files)} matches on disk, {len(ranks)} with an elo band recorded")
     all_rows = []
-    games_ok = games_short = games_sin_timeline = 0
+    games_ok = games_short = games_no_timeline = 0
     for i, fn in enumerate(files, 1):
         match_id = fn[:-5]
         try:
@@ -229,8 +230,8 @@ def build():
                 match = json.load(f)
             timeline = get_timeline(match_id)
             if timeline is None:
-                games_sin_timeline += 1
-                continue  # sin timeline en disco -> relanza crawler.py
+                games_no_timeline += 1
+                continue  # no timeline on disk -> re-run crawler.py
             rows = rows_for_match(match, timeline, ranks.get(match_id, ("UNKNOWN", "")))
         except Exception as ex:
             print(f"  ! {match_id}: {ex}", flush=True)
@@ -241,10 +242,10 @@ def build():
         all_rows.extend(rows)
         games_ok += 1
         if i % 25 == 0:
-            print(f"[{i}/{len(files)}] partidas -> {len(all_rows)} filas", flush=True)
+            print(f"[{i}/{len(files)}] matches -> {len(all_rows)} rows", flush=True)
 
     if not all_rows:
-        print("No hay filas. ¿Ya descargaste partidas con crawler.py?")
+        print("No rows. Did you already download matches with crawler.py?")
         return
 
     fieldnames = list(all_rows[0].keys())
@@ -254,16 +255,16 @@ def build():
         writer.writerows(all_rows)
 
     n_blue = sum(r["blue_win"] for r in all_rows)
-    print(f"\nEscrito {FEATURES_CSV}")
-    print(f"  partidas validas: {games_ok}  (cortas: {games_short}, "
-          f"sin timeline: {games_sin_timeline})")
-    print(f"  filas (minuto x partida): {len(all_rows)}")
-    print(f"  balance blue_win: {n_blue}/{len(all_rows)} = {n_blue/len(all_rows):.3f}")
-    por_tier = {}
+    print(f"\nWrote {FEATURES_CSV}")
+    print(f"  valid matches: {games_ok}  (short: {games_short}, "
+          f"no timeline: {games_no_timeline})")
+    print(f"  rows (minute x match): {len(all_rows)}")
+    print(f"  blue_win balance: {n_blue}/{len(all_rows)} = {n_blue/len(all_rows):.3f}")
+    per_tier = {}
     for r in all_rows:
-        por_tier[r["tier"]] = por_tier.get(r["tier"], 0) + 1
-    print("  filas por banda de elo:")
-    for t, n in sorted(por_tier.items(), key=lambda x: -x[1]):
+        per_tier[r["tier"]] = per_tier.get(r["tier"], 0) + 1
+    print("  rows per elo band:")
+    for t, n in sorted(per_tier.items(), key=lambda x: -x[1]):
         print(f"    {t:>10}: {n:>7}")
 
 

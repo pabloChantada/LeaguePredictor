@@ -1,16 +1,16 @@
 """
-Calibracion del win%.
+Win% calibration.
 
-El AUC mide ORDENAR (¿pone al ganador por encima?). La calibracion mide que el
-numero SIGNIFIQUE algo: de todas las veces que decimos 70%, ¿gana el 70%?
-Para un producto de "probabilidad de ganar" esto importa mas que el AUC.
+AUC measures RANKING (does it put the winner above?). Calibration measures that the
+number MEANS something: out of all the times we say 70%, does 70% win?
+For a "win probability" product this matters more than AUC.
 
-Metricas:
-  - ECE  (Expected Calibration Error): error medio |predicho - real| por bins.
-  - Brier: error cuadratico medio de la probabilidad (mas bajo = mejor).
+Metrics:
+  - ECE  (Expected Calibration Error): mean |predicted - actual| per bin.
+  - Brier: mean squared error of the probability (lower = better).
 
-Entrena en train, AJUSTA la calibracion en valid (nunca en test, o mentiria) y
-mide en test. Split por partida, igual que el resto.
+Trains on train, FITS the calibration on valid (never on test, or it would lie)
+and measures on test. Split per match, same as the rest.
 """
 import numpy as np
 import pandas as pd
@@ -25,11 +25,11 @@ from sklearn.metrics import log_loss, roc_auc_score, brier_score_loss
 from train import load_dataset, FEATURES, TARGET
 
 SEED = 42
-MODEL_OUT = "models/modelo_calibrado.joblib"
+MODEL_OUT = "models/calibrated_model.joblib"
 
 
 def ece(y, p, n_bins=20):
-    """Expected Calibration Error: media ponderada de |confianza - acierto real|."""
+    """Expected Calibration Error: weighted mean of |confidence - actual accuracy|."""
     bins = np.linspace(0, 1, n_bins + 1)
     idx = np.digitize(p, bins) - 1
     total = 0.0
@@ -41,15 +41,15 @@ def ece(y, p, n_bins=20):
     return total
 
 
-def reporte(nombre, y, p):
-    print(f"{nombre:24s} auc={roc_auc_score(y, p):.4f}  logloss={log_loss(y, p):.4f}  "
+def report(name, y, p):
+    print(f"{name:24s} auc={roc_auc_score(y, p):.4f}  logloss={log_loss(y, p):.4f}  "
           f"brier={brier_score_loss(y, p):.4f}  ECE={ece(y, p):.4f}")
 
 
-def tabla_fiabilidad(y, p, n_bins=10):
+def reliability_table(y, p, n_bins=10):
     bins = np.linspace(0, 1, n_bins + 1)
     idx = np.digitize(p, bins) - 1
-    print(f"\n  {'predicho':>12s} {'real':>8s} {'n':>8s}  desvio")
+    print(f"\n  {'predicted':>12s} {'actual':>8s} {'n':>8s}  gap")
     for b in range(n_bins):
         m = idx == b
         if m.sum() < 30:
@@ -59,7 +59,7 @@ def tabla_fiabilidad(y, p, n_bins=10):
 
 
 def main():
-    df = load_dataset()  # filtra a soloQ; no leer el CSV a pelo (ver train.load_dataset)
+    df = load_dataset()  # filters to soloQ; do not read the CSV raw (see train.load_dataset)
     X, y, groups = df[FEATURES].values, df[TARGET].values, df["match_id"].values
 
     outer = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=SEED)
@@ -68,33 +68,33 @@ def main():
     tr_r, va_r = next(inner.split(X[tv], y[tv], groups[tv]))
     train_idx, valid_idx = tv[tr_r], tv[va_r]
 
-    print(f"Train {len(train_idx)} | Valid {len(valid_idx)} | Test {len(test_idx)} filas\n")
+    print(f"Train {len(train_idx)} | Valid {len(valid_idx)} | Test {len(test_idx)} rows\n")
 
     base = GradientBoostingClassifier(random_state=SEED)
     base.fit(X[train_idx], y[train_idx])
 
     yte = y[test_idx]
     p_base = base.predict_proba(X[test_idx])[:, 1]
-    reporte("SIN calibrar", yte, p_base)
+    report("uncalibrated", yte, p_base)
 
-    # la calibracion se AJUSTA en valid (datos que el modelo no vio)
-    for metodo in ("isotonic", "sigmoid"):
-        cal = CalibratedClassifierCV(FrozenEstimator(base), method=metodo)
+    # the calibration is FITTED on valid (data the model did not see)
+    for method in ("isotonic", "sigmoid"):
+        cal = CalibratedClassifierCV(FrozenEstimator(base), method=method)
         cal.fit(X[valid_idx], y[valid_idx])
         p = cal.predict_proba(X[test_idx])[:, 1]
-        reporte(f"calibrado ({metodo})", yte, p)
+        report(f"calibrated ({method})", yte, p)
 
-    print("\n--- Fiabilidad SIN calibrar (test) ---")
-    tabla_fiabilidad(yte, p_base)
+    print("\n--- Reliability UNCALIBRATED (test) ---")
+    reliability_table(yte, p_base)
 
     cal = CalibratedClassifierCV(FrozenEstimator(base), method="isotonic")
     cal.fit(X[valid_idx], y[valid_idx])
     p_cal = cal.predict_proba(X[test_idx])[:, 1]
-    print("\n--- Fiabilidad CALIBRADO isotonic (test) ---")
-    tabla_fiabilidad(yte, p_cal)
+    print("\n--- Reliability CALIBRATED isotonic (test) ---")
+    reliability_table(yte, p_cal)
 
     joblib.dump({"model": cal, "features": FEATURES}, MODEL_OUT)
-    print(f"\nGuardado en {MODEL_OUT}")
+    print(f"\nSaved to {MODEL_OUT}")
 
 
 if __name__ == "__main__":

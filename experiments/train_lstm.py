@@ -1,16 +1,16 @@
 """
-Modelo SECUENCIAL (LSTM) de win probability.
+SEQUENTIAL (LSTM) win probability model.
 
-A diferencia del modelo tabular (cada minuto es un punto independiente), aqui la
-red ve la SECUENCIA de minutos de la partida y emite una probabilidad en cada
-minuto, pudiendo aprender la trayectoria (snowball, remontadas) por si misma.
+Unlike the tabular model (each minute is an independent point), here the network
+sees the SEQUENCE of minutes of the match and emits a probability at each minute,
+so it can learn the trajectory (snowball, comebacks) by itself.
 
-CORRECCION CLAVE: la LSTM es UNIDIRECCIONAL. La salida en el minuto t solo
-depende de las entradas hasta t. Una LSTM bidireccional veria el futuro de la
-partida -> leakage (AUC irreal) y seria inservible en vivo.
+KEY CORRECTNESS NOTE: the LSTM is UNIDIRECTIONAL. The output at minute t only
+depends on the inputs up to t. A bidirectional LSTM would see the future of the
+match -> leakage (unrealistic AUC) and would be useless live.
 
-Usa EL MISMO split de test por partida (random_state=42) que train.py y
-train_lgbm.py, y el mismo set de features, para que el AUC sea comparable.
+Uses THE SAME per-match test split (random_state=42) as train.py and
+train_lgbm.py, and the same feature set, so the AUC is comparable.
 """
 import numpy as np
 import pandas as pd
@@ -36,7 +36,7 @@ np.random.seed(SEED)
 
 
 class LSTMWinProb(nn.Module):
-    """LSTM unidireccional -> logit de victoria azul en CADA minuto."""
+    """Unidirectional LSTM -> blue-win logit at EACH minute."""
 
     def __init__(self, n_features, hidden=HIDDEN, layers=LAYERS):
         super().__init__()
@@ -45,14 +45,14 @@ class LSTMWinProb(nn.Module):
         self.head = nn.Linear(hidden, 1)
 
     def forward(self, x):            # x: (B, T, F)
-        out, _ = self.lstm(x)        # (B, T, H) — out[:, t] solo ve hasta t
+        out, _ = self.lstm(x)        # (B, T, H) — out[:, t] only sees up to t
         return self.head(out).squeeze(-1)   # (B, T) logits
 
 
 def build_sequences(by_game, game_ids, feat_mean, feat_std, max_len):
-    """Convierte las partidas dadas en tensores padded (X, y, mask, minutes).
+    """Turns the given matches into padded tensors (X, y, mask, minutes).
 
-    by_game: dict {match_id: sub-dataframe ya ordenado por minuto}.
+    by_game: dict {match_id: sub-dataframe already sorted by minute}.
     """
     n = len(game_ids)
     X = np.zeros((n, max_len, len(FEATURES)), dtype=np.float32)
@@ -65,7 +65,7 @@ def build_sequences(by_game, game_ids, feat_mean, feat_std, max_len):
         t = min(len(g), max_len)
         feats = (g[FEATURES].values[:t] - feat_mean) / feat_std
         X[i, :t] = feats
-        y[i, :t] = g[TARGET].values[0]      # etiqueta constante en toda la partida
+        y[i, :t] = g[TARGET].values[0]      # constant label over the whole match
         mask[i, :t] = 1.0
         minutes[i, :t] = g["minute"].values[:t]
 
@@ -73,7 +73,7 @@ def build_sequences(by_game, game_ids, feat_mean, feat_std, max_len):
 
 
 def masked_auc(logits, y, mask):
-    """AUC solo sobre los timesteps validos (padding excluido)."""
+    """AUC only over the valid timesteps (padding excluded)."""
     sel = mask.bool()
     p = torch.sigmoid(logits[sel]).cpu().numpy()
     t = y[sel].cpu().numpy()
@@ -95,20 +95,20 @@ def main():
     df = pd.read_csv(CSV)
     groups = df["match_id"].values
 
-    # mismo split de test que los modelos tabulares
+    # same test split as the tabular models
     gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=SEED)
     trainval_idx, test_idx = next(gss.split(df[FEATURES].values, df[TARGET].values, groups))
     test_games = np.unique(groups[test_idx])
     trainval_games = np.unique(groups[trainval_idx])
 
-    # validacion por partida para early stopping
+    # per-match validation for early stopping
     rng = np.random.RandomState(SEED)
     perm = rng.permutation(len(trainval_games))
     n_val = int(0.2 * len(trainval_games))
     valid_games = trainval_games[perm[:n_val]]
     train_games = trainval_games[perm[n_val:]]
 
-    # normalizacion con estadisticos SOLO de train
+    # normalization with statistics from train ONLY
     tr_rows = df[df["match_id"].isin(set(train_games))]
     feat_mean = tr_rows[FEATURES].values.mean(axis=0)
     feat_std = tr_rows[FEATURES].values.std(axis=0)
@@ -116,10 +116,10 @@ def main():
 
     max_len = int(df.groupby("match_id").size().max())
     print(f"Games: train={len(train_games)} valid={len(valid_games)} test={len(test_games)}")
-    print(f"Longitud maxima de secuencia: {max_len} minutos\n")
+    print(f"Max sequence length: {max_len} minutes\n")
 
-    print("Construyendo secuencias...", flush=True)
-    # una sola pasada de groupby en vez de filtrar el df por cada partida
+    print("Building sequences...", flush=True)
+    # a single groupby pass instead of filtering the df for each match
     by_game = {gid: g.sort_values("minute") for gid, g in df.groupby("match_id")}
     tr = build_sequences(by_game, train_games, feat_mean, feat_std, max_len)
     va = build_sequences(by_game, valid_games, feat_mean, feat_std, max_len)
@@ -140,7 +140,7 @@ def main():
         for xb, yb, mb, _ in tr_loader:
             opt.zero_grad()
             logits = model(xb)
-            loss = (lossf(logits, yb) * mb).sum() / mb.sum()  # BCE enmascarada
+            loss = (lossf(logits, yb) * mb).sum() / mb.sum()  # masked BCE
             loss.backward()
             opt.step()
             total += loss.item()
@@ -152,7 +152,7 @@ def main():
         else:
             bad += 1
             if bad >= PATIENCE:
-                print(f"early stopping (sin mejora en {PATIENCE} epochs)")
+                print(f"early stopping (no improvement in {PATIENCE} epochs)")
                 break
 
     model.load_state_dict(best_state)
@@ -160,7 +160,7 @@ def main():
     pred = (p >= 0.5).astype(int)
     print(f"\nTEST  acc={accuracy_score(t, pred):.3f}  logloss={log_loss(t, p):.3f}  auc={auc:.3f}")
 
-    print("\nAccuracy por minuto (LSTM):")
+    print("\nAccuracy per minute (LSTM):")
     dte = pd.DataFrame({"minute": minutes, "y": t, "pred": pred})
     dte["bucket"] = pd.cut(dte["minute"], [0, 10, 15, 20, 25, 200],
                            labels=["<10", "10-15", "15-20", "20-25", ">25"])
@@ -168,8 +168,8 @@ def main():
         print(f"  min {b:>6}: acc={accuracy_score(g['y'], g['pred']):.3f}  (n={len(g)})")
 
     torch.save({"state_dict": model.state_dict(), "features": FEATURES,
-                "mean": feat_mean, "std": feat_std}, "models/modelo_lstm.pt")
-    print("\nGuardado en models/modelo_lstm.pt")
+                "mean": feat_mean, "std": feat_std}, "models/lstm_model.pt")
+    print("\nSaved to models/lstm_model.pt")
 
 
 if __name__ == "__main__":

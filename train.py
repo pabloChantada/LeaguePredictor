@@ -1,14 +1,14 @@
 """
-Baseline de prediccion de victoria (probabilidad) a partir de features.csv.
+Win prediction baseline (probability) from features.csv.
 
-Puntos clave:
-- Es CLASIFICACION con salida de probabilidad (predict_proba) = el "% de ganar".
-- Split train/test POR PARTIDA (GroupShuffleSplit sobre match_id): filas del mismo
-  match no pueden caer en train y test a la vez (si no, las metricas se inflan).
-- Compara Regresion Logistica (interpretable) y Gradient Boosting (no lineal).
-- Reporta accuracy, log-loss y ROC-AUC, ademas de accuracy POR MINUTO (el juego
-  temprano es mas dificil de predecir que el tardio).
-- Guarda el mejor modelo en modelo_baseline.joblib.
+Key points:
+- It is CLASSIFICATION with a probability output (predict_proba) = the "win %".
+- Train/test split PER MATCH (GroupShuffleSplit over match_id): rows from the same
+  match cannot land in train and test at once (otherwise the metrics inflate).
+- Compares Logistic Regression (interpretable) and Gradient Boosting (non-linear).
+- Reports accuracy, log-loss and ROC-AUC, plus accuracy PER MINUTE (early game is
+  harder to predict than late game).
+- Saves the best model to baseline_model.joblib.
 """
 from pathlib import Path
 
@@ -23,89 +23,89 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, log_loss, roc_auc_score
 
-ROOT = Path(__file__).resolve().parent  # rutas ancladas al fichero, no al CWD
+ROOT = Path(__file__).resolve().parent  # paths anchored to the file, not the CWD
 CSV = ROOT / "riot_dataset" / "features.csv"
-MODEL_OUT = ROOT / "models" / "modelo_baseline.joblib"
+MODEL_OUT = ROOT / "models" / "baseline_model.joblib"
 
-# Set LIVE-COMPAT: 13 features. TODAS obtenibles del Live Client Data API, para
-# que el modelo entrenado aqui se pueda servir en vivo sin train/serve skew.
+# LIVE-COMPAT set: 13 features. ALL obtainable from the Live Client Data API, so
+# that the model trained here can be served live with no train/serve skew.
 #
-# NO usa oro ni xp a proposito: en vivo no estan disponibles para los 10 jugadores.
-# Medido, prescindir de ambos cuesta solo -0.0020 de AUC (0.8674 -> 0.8654), porque
-# el oro es un RESUMEN de cs+kills+objetivos, que si tenemos: al conservar las
-# causas no se pierde la suma.
+# It does NOT use gold or xp on purpose: live, they are not available for the 10
+# players. Measured, dropping both costs only -0.0020 AUC (0.8674 -> 0.8654),
+# because gold is a SUMMARY of cs+kills+objectives, which we do have: keeping the
+# causes, we don't lose the sum.
 FEATURES = [
     "minute",
-    # estado de equipo (live: playerList -> scores.kills / creepScore / level)
+    # team state (live: playerList -> scores.kills / creepScore / level)
     "kills_diff", "cs_diff", "level_diff",
-    # objetivos / estructuras (live: eventos) -> el grupo que mas aporta
+    # objectives / structures (live: events) -> the group that contributes the most
     "tower_diff", "inhib_diff", "dragon_diff", "herald_diff", "baron_diff", "grub_diff",
-    # momentum (live: llevando la cuenta entre polls)
+    # momentum (live: keeping a running count between polls)
     "kills_diff_d5", "cs_diff_d5", "level_diff_d5",
-    # TODO(championStats/damageStats): estan en el CSV pero NO entran: -0.001 de AUC.
-    # TODO(escalado): scaling_diff descartado de momento (ver build_features.py)
+    # TODO(championStats/damageStats): they are in the CSV but do NOT enter: -0.001 AUC.
+    # TODO(scaling): scaling_diff dropped for now (see build_features.py)
 ]
 TARGET = "blue_win"
 
-# Solo soloQ 5v5. El crawler baja TODAS las colas de cada jugador (match-v5
-# by-puuid/ids no filtra por cola), asi que features.csv trae ~19% de partidas
-# que NO son el problema que modelamos:
-#   - Arena (1750): 2v2v2v2 sin torres/dragones/baron/inhibidores -> las 6
-#     features de objetivos son 0 ESTRUCTURAL (medido: el 100% de sus filas), y
-#     blue_win sale de teamId==100, que ahi no identifica al ganador -> etiqueta
-#     practicamente aleatoria. Eran 19.175 filas de ruido puro.
-#   - Co-op vs IA (710/870/890): el equipo humano casi siempre gana -> sesgo falso.
-#   - ARAM (450), Swiftplay (480): otro mapa / otras reglas.
-# SoloQ y nada mas: es la cola relevante y la unica con matchmaking serio por
-# rango. Flex (440) se considero y se descarto: es 5v5 en Grieta y mide casi
-# igual (AUC 0.836 vs 0.839 por cola), pero son premades jugando distinto y solo
-# aportaria un +6% de partidas. No merece ensuciar la definicion del problema.
+# SoloQ 5v5 only. The crawler downloads ALL queues of each player (match-v5
+# by-puuid/ids does not filter by queue), so features.csv carries ~19% of matches
+# that are NOT the problem we model:
+#   - Arena (1750): 2v2v2v2 with no towers/dragons/baron/inhibitors -> the 6
+#     objective features are 0 STRUCTURALLY (measured: 100% of their rows), and
+#     blue_win comes from teamId==100, which there does not identify the winner ->
+#     an essentially random label. It was 19,175 rows of pure noise.
+#   - Co-op vs AI (710/870/890): the human team almost always wins -> false bias.
+#   - ARAM (450), Swiftplay (480): different map / different rules.
+# SoloQ and nothing else: it is the relevant queue and the only one with serious
+# rank-based matchmaking. Flex (440) was considered and dropped: it is 5v5 on the
+# Rift and measures almost the same (AUC 0.836 vs 0.839 by queue), but they are
+# premades playing differently and would only add +6% of matches. Not worth
+# muddying the definition of the problem.
 QUEUE_SOLOQ = 420
 
-# Banda de elo que entra a entrenar (columna `tier`, de crawler.SEED_TIERS).
-# El modelo se sirve en TUS partidas y el Live Client Data no expone el rango de
-# los 10 jugadores -> el elo no puede ser feature: hay que entrenar en la banda
-# en la que se sirve. Ver "El elo" en el README.
-# TIERS = None desactiva el filtro (util para comparar contra el crawl viejo de
-# Challenger+GM, que no tiene procedencia registrada y sale como UNKNOWN).
+# Elo band that enters training (`tier` column, from crawler.SEED_TIERS).
+# The model is served on YOUR matches and the Live Client Data does not expose the
+# rank of the 10 players -> elo cannot be a feature: you have to train in the band
+# where it is served. See "Elo" in the README.
+# TIERS = None disables the filter (useful to compare against the old Challenger+GM
+# crawl, which has no provenance recorded and comes out as UNKNOWN).
 TIERS = ("EMERALD", "DIAMOND", "MASTER")
 
 
 def load_dataset(csv=CSV, queue_id=QUEUE_SOLOQ, tiers=TIERS):
-    """features.csv filtrado a la cola y la banda de elo objetivo.
+    """features.csv filtered to the target queue and elo band.
 
-    Punto UNICO de carga: train y experiments/ pasan por aqui para que nadie
-    entrene sin querer con Arena, partidas contra bots o dos bandas de elo
-    revueltas.
+    SINGLE load point: train and experiments/ go through here so nobody
+    accidentally trains with Arena, matches against bots or two blended elo bands.
     """
     df = pd.read_csv(csv)
     for col in ("queue_id", "tier"):
         if col not in df.columns:
             raise SystemExit(
-                f"{csv} no tiene la columna {col} (es de una version anterior).\n"
-                "Reconstruyelo:  python build_features.py"
+                f"{csv} does not have the {col} column (it is from an older version).\n"
+                "Rebuild it:  python build_features.py"
             )
-    n_antes = df["match_id"].nunique()
+    n_before = df["match_id"].nunique()
 
     df = df[df["queue_id"] == queue_id]
-    n_cola = df["match_id"].nunique()
-    print(f"Cola {queue_id}: {n_cola}/{n_antes} partidas "
-          f"({n_antes - n_cola} descartadas por no ser soloQ)")
+    n_queue = df["match_id"].nunique()
+    print(f"Queue {queue_id}: {n_queue}/{n_before} matches "
+          f"({n_before - n_queue} dropped for not being soloQ)")
 
     if tiers is not None:
         df = df[df["tier"].isin(tiers)]
         n_tier = df["match_id"].nunique()
-        print(f"Banda {list(tiers)}: {n_tier}/{n_cola} partidas "
-              f"({n_cola - n_tier} descartadas por elo fuera de banda o sin registrar)")
+        print(f"Band {list(tiers)}: {n_tier}/{n_queue} matches "
+              f"({n_queue - n_tier} dropped for elo out of band or unrecorded)")
 
     df = df.reset_index(drop=True)
     if df.empty:
         raise SystemExit(
-            f"No queda ninguna partida (cola {queue_id}, banda {list(tiers)}).\n"
-            "Es lo esperado hasta que crawlees la banda: el dataset viejo se sembro\n"
-            "en Challenger+GM y no tiene procedencia de elo registrada (sale UNKNOWN).\n"
-            "  - crawlear la banda objetivo:            python crawler.py\n"
-            "  - entrenar con el dataset viejo igual:   TIERS = None en train.py"
+            f"No match left (queue {queue_id}, band {list(tiers)}).\n"
+            "This is expected until you crawl the band: the old dataset was seeded\n"
+            "in Challenger+GM and has no elo provenance recorded (comes out UNKNOWN).\n"
+            "  - crawl the target band:                 python crawler.py\n"
+            "  - train with the old dataset anyway:     TIERS = None in train.py"
         )
     return df
 
@@ -116,17 +116,17 @@ def main():
     y = df[TARGET].values
     groups = df["match_id"].values
 
-    # --- split por partida ---
+    # --- split per match ---
     splitter = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
     train_idx, test_idx = next(splitter.split(X, y, groups))
     Xtr, Xte = X[train_idx], X[test_idx]
     ytr, yte = y[train_idx], y[test_idx]
 
     n_games = len(np.unique(groups))
-    print(f"Filas: {len(df)}  Partidas: {n_games}")
-    print(f"Train: {len(Xtr)} filas / {len(np.unique(groups[train_idx]))} partidas")
-    print(f"Test:  {len(Xte)} filas / {len(np.unique(groups[test_idx]))} partidas")
-    print(f"Baseline trivial (siempre mayoria): acc={max(yte.mean(), 1-yte.mean()):.3f}\n")
+    print(f"Rows: {len(df)}  Matches: {n_games}")
+    print(f"Train: {len(Xtr)} rows / {len(np.unique(groups[train_idx]))} matches")
+    print(f"Test:  {len(Xte)} rows / {len(np.unique(groups[test_idx]))} matches")
+    print(f"Trivial baseline (always majority): acc={max(yte.mean(), 1-yte.mean()):.3f}\n")
 
     models = {
         "LogReg": make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000)),
@@ -144,16 +144,16 @@ def main():
         results[name] = (model, acc, ll, auc, proba)
         print(f"{name:10s}  acc={acc:.3f}  logloss={ll:.3f}  auc={auc:.3f}")
 
-    # --- coeficientes de la regresion logistica (importancia interpretable) ---
+    # --- logistic regression coefficients (interpretable importance) ---
     logreg = results["LogReg"][0].named_steps["logisticregression"]
-    print("\nPesos LogReg (estandarizados, + favorece al equipo azul):")
+    print("\nLogReg weights (standardized, + favors the blue team):")
     for f, c in sorted(zip(FEATURES, logreg.coef_[0]), key=lambda t: -abs(t[1])):
         print(f"  {f:16s} {c:+.3f}")
 
-    # --- accuracy por tramo de minuto (mejor modelo por auc) ---
+    # --- accuracy per minute bucket (best model by auc) ---
     best_name = max(results, key=lambda k: results[k][3])
     best_model, _, _, _, best_proba = results[best_name]
-    print(f"\nAccuracy por minuto ({best_name}):")
+    print(f"\nAccuracy per minute ({best_name}):")
     dte = df.iloc[test_idx].copy()
     dte["proba"] = best_proba
     dte["pred"] = (dte["proba"] >= 0.5).astype(int)
@@ -163,7 +163,7 @@ def main():
         print(f"  min {b:>6}: acc={accuracy_score(g[TARGET], g['pred']):.3f}  (n={len(g)})")
 
     joblib.dump({"model": best_model, "features": FEATURES}, MODEL_OUT)
-    print(f"\nMejor modelo ({best_name}) guardado en {MODEL_OUT}")
+    print(f"\nBest model ({best_name}) saved to {MODEL_OUT}")
 
 
 if __name__ == "__main__":

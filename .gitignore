@@ -2,15 +2,13 @@
 __pycache__/
 *.pyc
 
-# Dataset: ~9 GB de JSON crudos, no versionar
+# Dataset: ~9 GB of raw JSON, not versioned
 riot_dataset/
 
-# Modelos entrenados: regenerables con train.py, no se versionan...
+# Trained models: regenerable with train.py, not versioned...
 models/*.joblib
 models/*.pt
-# ...salvo el que se sirve en vivo (140 KB). Va al repo a proposito: el modo en
-# vivo no necesita API key, asi que con esto el repo funciona nada mas clonar.
-!models/modelo_baseline.joblib
+# ...except the one served live (140 KB). It goes into the repo on purpose: live
+# mode needs no API key, so with this the repo works right after cloning.
+!models/baseline_model.joblib
 .env
-.agents
-.claude

@@ -1,16 +1,15 @@
 """
-Nucleo de la prediccion EN VIVO.
+Core of the LIVE prediction.
 
-Lee el estado de la partida en curso del Live Client Data API (corre en tu propio
-PC mientras juegas, en cualquier modo: ranked, normal, CUSTOM o practice tool),
-construye las MISMAS 13 features con las que se entreno el modelo y devuelve el
-win%.
+Reads the state of the ongoing match from the Live Client Data API (runs on your
+own PC while you play, in any mode: ranked, normal, CUSTOM or practice tool),
+builds the SAME 13 features the model was trained on and returns the win %.
 
-Por que estas 13 y no el oro: el modelo se entreno a proposito sin oro ni xp
-porque esta API no los da para los 10 jugadores. Ver train.FEATURES.
+Why these 13 and not gold: the model was trained on purpose without gold or xp
+because this API does not give them for the 10 players. See train.FEATURES.
 
-Uso directo (modo consola):   python live_predict.py
-Dashboard:                    streamlit run live_dashboard.py
+Direct use (console mode):   python live_predict.py
+Dashboard:                   streamlit run live_dashboard.py
 """
 import json
 import time
@@ -24,46 +23,46 @@ from train import FEATURES, MODEL_OUT
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# El endpoint es local y usa un certificado autofirmado de Riot -> verify=False.
+# The endpoint is local and uses a self-signed Riot certificate -> verify=False.
 URL = "https://127.0.0.1:2999/liveclientdata/allgamedata"
 POLL_SECONDS = 10
-DELTA_WINDOW = 5  # minutos, igual que en build_features.DELTA_WINDOW
-# Margen para dar el reloj por "retrocedido". No hace falta que sea grande:
-# gameTime es monotono dentro de una partida; solo cubre jitter del float.
-NEW_GAME_TOLERANCE = 5.0  # segundos
+DELTA_WINDOW = 5  # minutes, same as build_features.DELTA_WINDOW
+# Margin to consider the clock "went backwards". It does not need to be large:
+# gameTime is monotonic within a match; it only covers float jitter.
+NEW_GAME_TOLERANCE = 5.0  # seconds
 
-BLUE, RED = "ORDER", "CHAOS"   # ORDER = lado azul (teamId 100) = perspectiva del modelo
+BLUE, RED = "ORDER", "CHAOS"   # ORDER = blue side (teamId 100) = model's perspective
 
 
 class NoGameRunning(Exception):
-    """No hay partida en curso (o el cliente no expone el endpoint todavia)."""
+    """No match in progress (or the client does not expose the endpoint yet)."""
 
 
 def fetch_live_data(timeout=3):
     try:
         r = requests.get(URL, verify=False, timeout=timeout)
     except requests.exceptions.RequestException as ex:
-        raise NoGameRunning(f"No se pudo conectar a {URL}: {ex}") from ex
+        raise NoGameRunning(f"Could not connect to {URL}: {ex}") from ex
     if r.status_code != 200:
-        raise NoGameRunning(f"El cliente respondio {r.status_code}")
+        raise NoGameRunning(f"The client responded {r.status_code}")
     return r.json()
 
 
 def game_time(data):
-    """Segundos transcurridos de la partida en curso."""
+    """Seconds elapsed in the ongoing match."""
     return data.get("gameData", {}).get("gameTime", 0.0)
 
 
 def is_new_game(prev_time, cur_time):
-    """True si `cur_time` es de una partida DISTINTA a la de `prev_time`.
+    """True if `cur_time` is from a DIFFERENT match than `prev_time`.
 
-    El Live Client Data API no expone ningun id de partida (gameData solo trae
-    gameMode/gameTime/mapName), asi que la unica señal fiable es que el reloj
-    retroceda: al empezar otra partida vuelve a ~0.
+    The Live Client Data API does not expose any match id (gameData only carries
+    gameMode/gameTime/mapName), so the only reliable signal is the clock going
+    backwards: when another match starts it returns to ~0.
 
-    Reconectar a la MISMA partida (un corte del cliente, un F5 del dashboard)
-    deja el reloj avanzando -> no dispara reset y el historial sobrevive, que es
-    justo lo que queremos: resetear por una desconexion perderia la curva.
+    Reconnecting to the SAME match (a client drop, an F5 on the dashboard) leaves
+    the clock moving forward -> does not trigger a reset and the history survives,
+    which is exactly what we want: resetting on a disconnect would lose the curve.
     """
     return prev_time is not None and cur_time < prev_time - NEW_GAME_TOLERANCE
 
@@ -73,11 +72,11 @@ def _other(team):
 
 
 def _team_by_player(data):
-    """Nombre de jugador -> equipo, para atribuir eventos a un bando.
+    """Player name -> team, to attribute events to a side.
 
-    KillerName en los eventos trae SOLO el game name ("ChantaClown"), sin el tag,
-    mientras que riotId/summonerName vienen con el ("ChantaClown#milk"). Sin
-    riotIdGameName ningun objetivo se atribuye y dragon/baron/grub salen a 0.
+    KillerName in the events carries ONLY the game name ("ChantaClown"), without
+    the tag, while riotId/summonerName come with it ("ChantaClown#milk"). Without
+    riotIdGameName no objective gets attributed and dragon/baron/grub come out as 0.
     """
     out = {}
     for p in data.get("allPlayers", []):
@@ -88,11 +87,11 @@ def _team_by_player(data):
 
 
 def _structure_owner(name):
-    """Equipo DUEÑO de la estructura, leido de su nombre interno.
+    """OWNING team of the structure, read from its internal name.
 
-    El cliente las nombra "Turret_TOrder_L0_P3_..." / "Inhib_TChaos_L1_P1_...";
-    se acepta tambien el formato antiguo "_T1_"/"_T2_". Devuelve None si no se
-    reconoce, para no atribuir a ciegas.
+    The client names them "Turret_TOrder_L0_P3_..." / "Inhib_TChaos_L1_P1_...";
+    the old format "_T1_"/"_T2_" is also accepted. Returns None if unrecognized,
+    so as not to attribute blindly.
     """
     if "TOrder" in name or "_T1_" in name:
         return BLUE
@@ -101,21 +100,21 @@ def _structure_owner(name):
     return None
 
 
-# Contadores que read_counters devuelve, en orden de marcador. La clave es la
-# misma que usa read_state para nombrar su diff ("kills" -> "kills_diff").
+# Counters that read_counters returns, in scoreboard order. The key is the same
+# one read_state uses to name its diff ("kills" -> "kills_diff").
 COUNTERS = ["kills", "cs", "level", "towers", "inhibs",
             "dragons", "heralds", "barons", "grubs"]
-# nombre de la feature del modelo para cada contador (no todos son plural regular)
+# model feature name for each counter (not all are regular plurals)
 DIFF_NAME = {"kills": "kills_diff", "cs": "cs_diff", "level": "level_diff",
              "towers": "tower_diff", "inhibs": "inhib_diff", "dragons": "dragon_diff",
              "heralds": "herald_diff", "barons": "baron_diff", "grubs": "grub_diff"}
 
 
 def read_counters(data):
-    """Contadores BRUTOS por equipo: {contador: {ORDER: n, CHAOS: n}}.
+    """RAW per-team counters: {counter: {ORDER: n, CHAOS: n}}.
 
-    Separado de read_state porque el modelo solo quiere diffs, pero el dashboard
-    necesita los absolutos de cada bando para pintar el marcador.
+    Split from read_state because the model only wants diffs, but the dashboard
+    needs each side's absolutes to draw the scoreboard.
     """
     kills = {BLUE: 0, RED: 0}
     cs = {BLUE: 0, RED: 0}
@@ -139,8 +138,8 @@ def read_counters(data):
     by_player = _team_by_player(data)
     for e in data.get("events", {}).get("Events", []):
         name = e.get("EventName")
-        # Estructuras: el NOMBRE dice de quien era (T1 = ORDER, T2 = CHAOS).
-        # Es mas fiable que KillerName, porque un esbirro puede tirar la torre.
+        # Structures: the NAME says whose it was (T1 = ORDER, T2 = CHAOS).
+        # It is more reliable than KillerName, because a minion can take the tower.
         if name == "TurretKilled":
             owner = _structure_owner(e.get("TurretKilled", ""))
             if owner:
@@ -149,11 +148,11 @@ def read_counters(data):
             owner = _structure_owner(e.get("InhibKilled", ""))
             if owner:
                 inhibs[_other(owner)] += 1
-        # Monstruos epicos: hay que mirar quien lo mato.
+        # Epic monsters: we have to look at who killed it.
         elif name in ("DragonKill", "HeraldKill", "BaronKill", "HordeKill"):
             team = by_player.get(e.get("KillerName"))
             if team not in kills:
-                continue  # lo mato algo que no es un jugador -> no atribuible
+                continue  # killed by something that is not a player -> not attributable
             if name == "DragonKill":
                 dragons[team] += 1
             elif name == "HeraldKill":
@@ -169,9 +168,9 @@ def read_counters(data):
 
 
 def read_state(data):
-    """Estado del juego en este instante, como diffs (azul − rojo).
+    """Game state at this instant, as diffs (blue - red).
 
-    Es la perspectiva del modelo: todas sus features son diferencias.
+    This is the model's perspective: all its features are differences.
     """
     c = read_counters(data)
     state = {"minute": int(game_time(data) // 60)}
@@ -181,17 +180,17 @@ def read_state(data):
 
 
 def build_features(state, history):
-    """Estado + momentum -> el vector de 13 features en el orden de FEATURES.
+    """State + momentum -> the vector of 13 features in FEATURES order.
 
-    history: lista de estados pasados (dicts de read_state), en orden.
-    Los _d5 comparan contra el estado de hace DELTA_WINDOW minutos; si aun no
-    existe (partida joven), valen 0 — igual que en build_features.py.
+    history: list of past states (dicts from read_state), in order.
+    The _d5 compare against the state from DELTA_WINDOW minutes ago; if it does not
+    exist yet (young match), they are 0 — same as in build_features.py.
     """
     prev = None
     target = state["minute"] - DELTA_WINDOW
     for h in history:
         if h["minute"] <= target:
-            prev = h  # el mas reciente que no supere el objetivo
+            prev = h  # the most recent one that does not exceed the target
     feats = dict(state)
     for col in ("kills_diff", "cs_diff", "level_diff"):
         feats[f"{col}_d5"] = (state[col] - prev[col]) if prev else 0
@@ -199,7 +198,7 @@ def build_features(state, history):
 
 
 def active_team(data):
-    """Equipo del jugador que esta en este PC (para mostrar 'tu' win%)."""
+    """Team of the player on THIS PC (to show 'your' win %)."""
     me = data.get("activePlayer", {})
     name = me.get("riotId") or me.get("summonerName")
     return _team_by_player(data).get(name, BLUE)
@@ -217,22 +216,22 @@ def predict_blue_winrate(model, features, feature_names=FEATURES):
 
 def main():
     model, names = load_model()
-    print(f"Modelo cargado ({len(names)} features). Esperando partida...\n")
+    print(f"Model loaded ({len(names)} features). Waiting for a match...\n")
     history = []
     last_t = None
     while True:
         try:
             data = fetch_live_data()
         except NoGameRunning as ex:
-            print(f"  ... sin partida ({ex})", flush=True)
+            print(f"  ... no match ({ex})", flush=True)
             time.sleep(POLL_SECONDS)
             continue
 
-        # Partida nueva -> historial limpio, o los _d5 compararian contra la anterior.
+        # New match -> clean history, otherwise the _d5 would compare against the previous one.
         t = game_time(data)
         if is_new_game(last_t, t):
             history.clear()
-            print("\n--- Partida nueva: historial reiniciado ---\n", flush=True)
+            print("\n--- New match: history reset ---\n", flush=True)
         last_t = t
 
         state = read_state(data)
@@ -243,9 +242,9 @@ def main():
 
         mine = active_team(data)
         p_mine = p_blue if mine == BLUE else 1 - p_blue
-        print(f"[min {state['minute']:>2}]  TU EQUIPO ({mine}): {p_mine:6.1%}   "
-              f"| azul {p_blue:5.1%} | k{state['kills_diff']:+d} "
-              f"cs{state['cs_diff']:+d} torres{state['tower_diff']:+d}", flush=True)
+        print(f"[min {state['minute']:>2}]  YOUR TEAM ({mine}): {p_mine:6.1%}   "
+              f"| blue {p_blue:5.1%} | k{state['kills_diff']:+d} "
+              f"cs{state['cs_diff']:+d} towers{state['tower_diff']:+d}", flush=True)
         time.sleep(POLL_SECONDS)
 
 

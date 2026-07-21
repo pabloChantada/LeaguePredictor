@@ -1,17 +1,17 @@
-# Pipeline principal
+# Main pipeline
 requests
 python-dotenv
 pandas
 numpy
-# Fijada: el repo distribuye models/modelo_baseline.joblib, y un pickle de
-# sklearn cargado con otra version avisa (InconsistentVersionWarning) o falla.
+# Pinned: the repo ships models/baseline_model.joblib, and an sklearn pickle
+# loaded with a different version warns (InconsistentVersionWarning) or fails.
 scikit-learn==1.9.0
 joblib
 matplotlib
 
-# Dashboard en vivo
+# Live dashboard
 streamlit
 
-# Solo para experiments/train_lstm.py (aparcado). Instalar aparte con:
+# Only for experiments/train_lstm.py (shelved). Install separately with:
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
 # torch
