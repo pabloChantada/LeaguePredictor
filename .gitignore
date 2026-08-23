@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Dataset: ~9 GB of raw JSON, not versioned
 riot_dataset/

@@ -1,17 +1,17 @@
 """
 Win% calibration.
 
-AUC measures RANKING (does it put the winner above?). Calibration measures that the
-number MEANS something: out of all the times we say 70%, does 70% win?
-For a "win probability" product this matters more than AUC.
+AUC measures if the model predicts the correct ranking. 
+The metrics implemented here measure that the number means something.
+Out of all the times we say that blue team have a 70% wr, do they win 70% of the time?
 
-Metrics:
+Metrics:k
   - ECE  (Expected Calibration Error): mean |predicted - actual| per bin.
   - Brier: mean squared error of the probability (lower = better).
 
-Trains on train, FITS the calibration on valid (never on test, or it would lie)
-and measures on test. Split per match, same as the rest.
+Trains on train, calibration on valid and measures on test.
 """
+
 import numpy as np
 import pandas as pd
 import joblib
@@ -22,11 +22,10 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.frozen import FrozenEstimator
 from sklearn.metrics import log_loss, roc_auc_score, brier_score_loss
 
-from train import load_dataset, FEATURES, TARGET
+from src.building.train import load_dataset, FEATURES, TARGET
 
 SEED = 42
 MODEL_OUT = "models/calibrated_model.joblib"
-
 
 def ece(y, p, n_bins=20):
     """Expected Calibration Error: weighted mean of |confidence - actual accuracy|."""
@@ -59,9 +58,10 @@ def reliability_table(y, p, n_bins=10):
 
 
 def main():
-    df = load_dataset()  # filters to soloQ; do not read the CSV raw (see train.load_dataset)
+    df = load_dataset()  # filters to soloQ
     X, y, groups = df[FEATURES].values, df[TARGET].values, df["match_id"].values
 
+    # Separate train, valid and test by match_id to avoid data leakage 
     outer = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=SEED)
     tv, test_idx = next(outer.split(X, y, groups))
     inner = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=SEED)
@@ -70,6 +70,7 @@ def main():
 
     print(f"Train {len(train_idx)} | Valid {len(valid_idx)} | Test {len(test_idx)} rows\n")
 
+    # Train a boosting model
     base = GradientBoostingClassifier(random_state=SEED)
     base.fit(X[train_idx], y[train_idx])
 
@@ -77,7 +78,6 @@ def main():
     p_base = base.predict_proba(X[test_idx])[:, 1]
     report("uncalibrated", yte, p_base)
 
-    # the calibration is FITTED on valid (data the model did not see)
     for method in ("isotonic", "sigmoid"):
         cal = CalibratedClassifierCV(FrozenEstimator(base), method=method)
         cal.fit(X[valid_idx], y[valid_idx])
@@ -90,7 +90,7 @@ def main():
     cal = CalibratedClassifierCV(FrozenEstimator(base), method="isotonic")
     cal.fit(X[valid_idx], y[valid_idx])
     p_cal = cal.predict_proba(X[test_idx])[:, 1]
-    print("\n--- Reliability CALIBRATED isotonic (test) ---")
+    print("\n--- Reliability CALIBRATED (test) ---")
     reliability_table(yte, p_cal)
 
     joblib.dump({"model": cal, "features": FEATURES}, MODEL_OUT)

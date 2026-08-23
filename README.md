@@ -95,6 +95,17 @@ Development keys also **expire every 24 hours**. If you receive a 401 error, gen
 
 The target region and ranked tiers can be modified through the constants defined at the beginning of `crawler.py` (`SEED_TIERS`, `PLATFORM`, and `REGION`).
 
+## Tests
+
+The pipeline's core logic (feature extraction, dataset filtering, live-state
+parsing, calibration metrics) has a unit test suite that runs with no API key,
+no dataset and no running game:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Experiments
 
 ```bash

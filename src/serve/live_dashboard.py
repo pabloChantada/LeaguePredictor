@@ -3,13 +3,12 @@ Live win% dashboard.
 
     streamlit run live_dashboard.py
 
-Reads the ongoing match (Live Client Data API), predicts every POLL_SECONDS and
-draws the probability curve as the match progresses.
+Reads the ongoing match (Live Client Data API), asks the deployed prediction
+API every POLL_SECONDS, and draws the probability curve as the match
+progresses. live_predict.predict_blue_winrate does an HTTP call to the FastAPI service.
 
-Works in any mode (ranked, normal, CUSTOM, practice tool) as long as the match
-runs ON THIS PC. Note: the model was trained on high-elo soloQ 5v5, so in a custom
-with bots the number does not mean much — it is useful to validate that the
-pipeline works.
+Works in any mode (ranked, normal, CUSTOM, practice tool) as long as the
+match runs ON THIS PC. Note: the model was trained on high-elo soloQ 5v5.
 """
 import time
 
@@ -17,7 +16,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-import live_predict as lp
+import src.serve.live_predict as lp
 
 st.set_page_config(page_title="LoL Win Probability", layout="wide")
 
@@ -28,11 +27,6 @@ LABELS = {
     "heralds": "Heralds", "barons": "Barons", "grubs": "Void Grubs",
 }
 
-# Palette validated with the dataviz guide's validator (see README).
-# The blue/red pair separates by ΔE 21.6 in protanopia (threshold 8) -> readable
-# with color blindness. The previous green/red gave ΔE 4.2: a red-green colorblind
-# viewer could not tell "winning" from "losing". The dark steps are the guide's for
-# a dark surface, NOT an automatic flip of the light one.
 LIGHT = {"blue": "#2a78d6", "red": "#e34948", "ink": "#0b0b0b",
          "muted": "#898781", "grid": "#e1e0d9", "base": "#c3c2b7"}
 DARK = {"blue": "#3987e5", "red": "#e66767", "ink": "#ffffff",
@@ -40,17 +34,15 @@ DARK = {"blue": "#3987e5", "red": "#e66767", "ink": "#ffffff",
 
 
 def palette():
-    # st.context.theme is the theme the browser ACTUALLY renders.
-    # theme.base is no good: it reads the config, which is None if you never set it,
-    # so the chart came out with the light palette inside a dark theme (black line
-    # and label on a black background, white grid).
     theme = getattr(st.context, "theme", None)
     return DARK if theme is not None and theme.type == "dark" else LIGHT
 
-
 @st.cache_resource
-def load_cached_model():
-    return lp.load_model()
+def warm_up_once():
+    """Ping the prediction API once per session so a cold start on Render/Fly
+    happens here, with a visible spinner."""
+    lp.warm_up_api()
+    return True
 
 
 def reset_match():
@@ -65,18 +57,16 @@ def clock(seconds):
 
 
 def draw_curve(curve, my_team, col):
-    """Win% of YOUR team over the course of the match.
+    """Win% of YOUR team over the course of the match. The fill uses the TEAM colors."""
 
-    The fill uses the TEAM colors, not "green=good/red=bad": the area is painted the
-    color of the side that is ahead. This way the color always means the same here
-    and on the scoreboard (blue=blue team), and the height is still YOUR
-    probability, whatever your side is.
-    """
     df = pd.DataFrame(curve, columns=["t", "p_blue"])
+    # win prob
     p = (df.p_blue if my_team == lp.BLUE else 1 - df.p_blue) * 100
+
     mine = col["blue"] if my_team == lp.BLUE else col["red"]
     theirs = col["red"] if my_team == lp.BLUE else col["blue"]
 
+    # plot the curve
     fig, ax = plt.subplots(figsize=(10, 3.6))
     fig.patch.set_alpha(0)              # adapts to Streamlit's background
     ax.set_facecolor("none")
@@ -113,6 +103,7 @@ def draw_curve(curve, my_team, col):
 def draw_scoreboard(counters, col):
     """Blue vs red scoreboard with each side's absolutes."""
     rows = []
+    # obtained as absolutes not diffs, and rendered using html
     for k in lp.COUNTERS:
         b, r = counters[k][lp.BLUE], counters[k][lp.RED]
         rows.append(f"""<tr>
@@ -131,11 +122,14 @@ def draw_scoreboard(counters, col):
 
 
 def main():
-    st.title("Live win probability")
-    model, names = load_cached_model()
-    st.caption(f"Model: {len(names)} features, AUC 0.836, ECE 1.1% (soloQ) · "
+    st.title("LoL Live Win Probability")
+    st.caption(f"Model served via API | 13 features, AUC 0.836, ECE 1.1% (soloQ)· "
                f"refresh every {lp.POLL_SECONDS}s")
 
+    with st.spinner("Waking up the prediction service (free-tier cold start)..."):
+        warm_up_once()
+
+    # Initialize session state on first run, or when a new match is detected.
     if "hist" not in st.session_state:
         reset_match()
 
@@ -144,29 +138,42 @@ def main():
 
     while True:
         try:
+            # obtain the match data
             data = lp.fetch_live_data()
         except lp.NoGameRunning as ex:
             with slot.container():
-                st.info("**No match in progress.** Enter a match —a **custom** or "
-                        "the **practice tool** works— and this will start on its own.")
+                st.info("**No match in progress.**")
                 st.caption(f"Detail: {ex}")
             time.sleep(lp.POLL_SECONDS)
             continue
 
-        # New match -> drop the curve and history of the previous one. It is not
-        # enough that it looks wrong: the _d5 would compare against the previous match.
+        # The match has changed (new game): reset the session state to start a new curve.
         t = lp.game_time(data)
         if lp.is_new_game(st.session_state.last_t, t):
             reset_match()
+
+        # Update the last_t in session state to the current game time
         st.session_state.last_t = t
 
+        # Obtain the state (diffs) and the feature vector for the model, and store them in session state.
         state = lp.read_state(data)
         # one state per minute: that is what the momentum computation expects
         if not st.session_state.hist or st.session_state.hist[-1]["minute"] != state["minute"]:
             st.session_state.hist.append(state)
 
         feats = lp.build_features(state, st.session_state.hist)
-        p_blue = lp.predict_blue_winrate(model, feats, names)
+
+        try:
+            p_blue = lp.predict_blue_winrate(feats)
+        except lp.PredictionUnavailable as ex:
+            with slot.container():
+                st.warning("**Prediction service unavailable right now.** "
+                           "Retrying automatically, this can happen on a "
+                           "free-tier cold start or a brief network failure.")
+                st.caption(f"Detail: {ex}")
+            time.sleep(lp.POLL_SECONDS)
+            continue
+
         my_team = lp.active_team(data)
         p_mine = p_blue if my_team == lp.BLUE else 1 - p_blue
 
@@ -175,14 +182,14 @@ def main():
         st.session_state.curve.append((t / 60, p_blue))
 
         with slot.container():
-            # A single big number: YOUR team's win%. The blue one does not go as a
-            # separate tile — the curve already says it, and with context.
+            # A single big number
             side = "blue" if my_team == lp.BLUE else "red"
             c1, c2 = st.columns([2, 1])
             # trend: how much YOUR win% has moved in the last 5 min
             ago5 = [q for tt, q in st.session_state.curve if tt <= t / 60 - 5]
             if ago5:
                 before = ago5[-1] if my_team == lp.BLUE else 1 - ago5[-1]
+                # change in wr in the last 5 min, as a signed percentage point (not relative %)
                 delta = f"{(p_mine - before) * 100:+.1f} pts in 5 min"
             else:
                 delta = None
@@ -197,20 +204,19 @@ def main():
                     # read the number, not a problem to attend to.
                     if state["minute"] > 25:
                         st.caption("Minute >25: long matches are close *precisely* "
-                                   "because they last — trust the number less.")
+                                   "because they last trust the number less.")
             with m:
                 draw_scoreboard(lp.read_counters(data), col)
 
             # table twin: every value on the chart is readable without color
             with st.expander("Feature vector (what the model sees)"):
-                st.dataframe(pd.DataFrame([{k: feats[k] for k in names}]),
+                st.dataframe(pd.DataFrame([{k: feats[k] for k in lp.FEATURES}]),
                              hide_index=True, use_container_width=True)
                 st.dataframe(pd.DataFrame(st.session_state.curve,
                                           columns=["minute", "p_blue"]),
                              hide_index=True, use_container_width=True, height=200)
 
         time.sleep(lp.POLL_SECONDS)
-
 
 if __name__ == "__main__":
     main()
