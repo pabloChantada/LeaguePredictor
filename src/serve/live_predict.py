@@ -20,13 +20,10 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-LIVE_URL = "https://127.0.0.1:2999/liveclientdata/allgamedata"
+LIVE_CLIENT_URL = "https://host.docker.internal:2999/liveclientdata/allgamedata"
+PREDICT_API_URL = "http://host.docker.internal:8000/predict"
 LIVE_TIMEOUT = 3
 
-# --- Prediction API (deployed, real cert) -----------------------------------
-# Override with an env var so the same script works against a local
-# `uvicorn main:app` during development and the deployed URL in normal use.
-PREDICT_API_URL = os.getenv("PREDICT_API_URL", "http://127.0.0.1:8000/predict")
 # Generous on purpose: Render/Fly free tier can cold-start a sleeping service
 # in 20-50s, and that's normal, not a failure.
 PREDICT_TIMEOUT = 30
@@ -57,9 +54,9 @@ class PredictionUnavailable(Exception):
 
 def fetch_live_data(timeout=LIVE_TIMEOUT):
     try:
-        r = requests.get(LIVE_URL, verify=False, timeout=timeout)
+        r = requests.get(LIVE_CLIENT_URL, verify=False, timeout=timeout)
     except requests.exceptions.RequestException as ex:
-        raise NoGameRunning(f"Could not connect to {LIVE_URL}: {ex}") from ex
+        raise NoGameRunning(f"Could not connect to {LIVE_CLIENT_URL}: {ex}") from ex
     # != 200 -> not ok
     if r.status_code != 200:
         raise NoGameRunning(f"The client responded {r.status_code}")

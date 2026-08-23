@@ -7,16 +7,15 @@ WORKDIR /app
 
 RUN pip install uv
 
-# copy dependencies files
-COPY pyproject.toml uv.lock /app/
+COPY pyproject.toml uv.lock ./
 
-# use cache and --no-dev depencies
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-# copy the code to the root 
-COPY /src /app/src
+COPY src ./src
 
-# uv will automatically install the dependencies from uv.lock
-# start both the app and the live dashboard (dependent)
-CMD ["uv", "run", "serve:app", "serve:live-dashboard"]
+EXPOSE 8000 8501
+
+CMD ["bash", "-c", \
+    "uv run uvicorn src.serve.app:app --host 0.0.0.0 --port 8000 & \
+     uv run streamlit run src/serve/live_dashboard.py --server.address 0.0.0.0 --server.port 8501"]
