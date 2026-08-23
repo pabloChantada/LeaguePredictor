@@ -13,7 +13,7 @@ on:
       - master
 
 jobs:
-  lint and test:
+  lint_and_test:
     name: Pylint
     runs-on: ubuntu-latest
 
