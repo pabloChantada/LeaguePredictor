@@ -1,0 +1,12 @@
+services:
+  league_predictor:
+    build: .  # root directory
+    container_name: league_predictor
+    # Save excel and cover letters in the local machine
+    volumes:
+      - ./src/:/app/src  # remove after development, only for testing
+      - ./.env:/app/.env
+    environment:
+      - RIOT_API_KEY=${RIOT_API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allow the container to access the host machine

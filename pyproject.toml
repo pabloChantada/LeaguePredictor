@@ -1,3 +1,36 @@
+[project]
+name = "leaguepredictor"
+version = "0.1.0"
+description = "A model to predict the probability of winning in League of Legends in a live match."
+readme = "README.md"
+authors = [
+    { name = "Pablo Chantada Saborido", email = "pablochantadasaborido@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "httpx2>=2.12.0",
+    "matplotlib>=3.11.1",
+    "numpy>=2.4.6",
+    "pandas>=3.0.5",
+    "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.17.1",
+    "streamlit>=1.62.0",
+    "uvicorn>=0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "debugpy>=1.8.21",
+    "ipykernel>=7.3.0",
+    "ipython>=9.16.1",
+    "isort>=8.0.1",
+    "pylint>=4.0.7",
+    "pytest>=9.1.1",
+]
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
-testpaths = ["tests"]
+addopts = "--ignore=src/building/config.py"

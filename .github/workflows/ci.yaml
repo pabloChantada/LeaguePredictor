@@ -1,0 +1,50 @@
+name: CI
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  lint and test:
+    name: Pylint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          uv sync --dev
+
+      - name: Run Pylint
+        run: |
+          uv run pylint $(git ls-files '*.py') --fail-under=7
+
+      - name: Run tests with coverage
+        run: |
+          uv run pytest -q \
+            --cov=building \
+            --cov=league_model \
+            --cov=models \
+            --cov=serve \
+            --cov-report=term-missing \
+            --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

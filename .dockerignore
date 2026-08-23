@@ -1,0 +1,49 @@
+# virtual environments
+.venv/
+venv/
+env/
+
+# cache
+__pycache__/
+*.pyc
+*.pyo
+
+# big files
+*.pkl
+*.h5
+*.onnx
+*.zip
+*.tar.gz
+*.csv
+*.xlsx
+*.xls
+
+# data
+data/
+# models/
+datasets/
+input/
+output/
+*/riot_dataset/*
+
+# logs
+*.log
+logs/
+
+# Git
+.git/
+.gitignore
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# testing/coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore

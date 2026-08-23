@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-import src.serve.live_predict as lp
+import live_predict as lp
 
 st.set_page_config(page_title="LoL Win Probability", layout="wide")
 
@@ -199,7 +199,9 @@ def main():
             g, m = st.columns([3, 1])
             with g:
                 if len(st.session_state.curve) > 1:
-                    st.pyplot(draw_curve(st.session_state.curve, my_team, col))
+                    fig = draw_curve(st.session_state.curve, my_team, col)
+                    st.pyplot(fig)
+                    plt.close(fig)
                     # A discreet note, not an alarm box: it is a warning about how to
                     # read the number, not a problem to attend to.
                     if state["minute"] > 25:
@@ -211,10 +213,10 @@ def main():
             # table twin: every value on the chart is readable without color
             with st.expander("Feature vector (what the model sees)"):
                 st.dataframe(pd.DataFrame([{k: feats[k] for k in lp.FEATURES}]),
-                             hide_index=True, use_container_width=True)
+                            hide_index=True, width="stretch")
                 st.dataframe(pd.DataFrame(st.session_state.curve,
-                                          columns=["minute", "p_blue"]),
-                             hide_index=True, use_container_width=True, height=200)
+                                        columns=["minute", "p_blue"]),
+                            hide_index=True, width="stretch", height=200)
 
         time.sleep(lp.POLL_SECONDS)
 
