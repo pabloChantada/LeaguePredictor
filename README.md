@@ -1,206 +1,126 @@
-# League of Legends Live Win Prediction
+# League of Legends Live Win Predictor
 
-**Real-time League of Legends win probability, updated every minute of the game.**
+![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![Codecov](https://codecov.io/gh/pabloChantada/LeaguePredictor/branch/main/graph/badge.svg)
+[![Tests](https://github.com/pabloChantada/LeaguePredictor/actions/workflows/ci.yaml/badge.svg)](https://github.com/pabloChantada/LeaguePredictor/actions/workflows/ci.yaml)
+![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)
+![Render](<https://img.shields.io/badge/Deployed%20on-Render-000000?style=flat&logo=render>)
 
-Reads your currently running match through Riot's **Live Client Data API** and estimates your team's probability of winning, updating every 10 seconds. Nothing is injected into the game and no memory is modified—the application only uses the local API already exposed by the League of Legends client.
+Real-time League of Legends win probability, updated every minute of the game.
 
-![Live Dashboard](docs/dashboard.png)
+Reads the currently running match through Riot's Live Client Data API and estimates the team's probability of winning. Nothing is injected into the game and no memory is modified; the application only reads the local API already exposed by the League of Legends client.
+
+<video src="docs/dashboard_video.mp4" controls width="100%"></video>
+
+## Live Demos and Monitoring
+
+| Service        | Link                                                                 | Description                                                      |
+| :------------- | :------------------------------------------------------------------- | :--------------------------------------------------------------- |
+| Live Dashboard | [Streamlit Cloud](https://chantaclown-leaguepredictor.streamlit.app/) | Interactive web UI with live probability curves and scoreboards. |
+| Prediction API | [Render](https://league-of-legends-win-predictor.onrender.com)        | FastAPI service serving the Gradient Boosting model.             |
+| Test Coverage  | [Codecov](https://app.codecov.io/gh/pabloChantada/LeaguePredictor)    | CI/CD coverage reports for the core pipeline.                    |
+| Error Tracking | [Sentry](https://chantaclown.sentry.io/projects/league_predictor/)    | Real-time crash reporting and performance monitoring.            |
 
 ## Overview
 
-A machine learning model trained on **7,956 ranked Solo Queue matches** that estimates the probability of either team winning at every minute of the game using 13 features describing the current game state:
+A machine learning model trained on 7,956 ranked Solo Queue (from Emerald to Master) matches that estimates the probability of either team winning at every minute of the game using 13 features describing the current game state:
 
-- Kills
-- CS
-- Champion levels
-- Towers
-- Inhibitors
-- Dragons
-- Rift Heralds
-- Baron Nashors
-- Void Grubs
-- Five-minute momentum
+- Kills, CS, Champion levels
+- Towers, Inhibitors
+- Dragons, Rift Heralds, Baron Nashors, Void Grubs
+- Five-minute momentum (deltas in kills, CS, and levels)
 
-The goal is not simply to predict the winner—it is to produce **well-calibrated probabilities**. Whenever the model predicts a 70% chance of winning, the corresponding team should actually win roughly 70% of the time.
+The goal is to produce well-calibrated probabilities. Whenever the model predicts a 70% chance of winning, the corresponding team should actually win roughly 70% of the time.
 
-| Metric | Value |
-|---|---:|
-| **ECE** (Expected Calibration Error) | **1.1%** |
-| ROC-AUC | 0.836 |
-| Dataset | 7,956 Solo Queue matches / 186,635 minute snapshots (EUW) |
-| Model | Gradient Boosting (13 features) |
-
-## Requirements
-
-- Python 3.10+
-- **For live predictions:** League of Legends installed on the same computer.
-- **For training:** a Riot Games API key from https://developer.riotgames.com/.
-
-## Installation
-
-```bash
-git clone <repository>
-cd league_model
-pip install -r requirements.txt
-```
-
-If you only want live predictions, you're done—the trained model is already included in `models/`.
-
-To collect data and train your own model:
-
-```bash
-cp .env.example .env
-```
-
-Then add your Riot API key to the `.env` file.
-
-## Usage
-
-### Live Win Probability
-
-Launch a League of Legends match and start the dashboard:
-
-```bash
-streamlit run live_dashboard.py
-```
-
-The application waits until it detects an active game and then automatically starts displaying:
-
-- Current win probability
-- Probability change over the last five minutes
-- Full probability timeline
-- Objective scoreboard for both teams
-
-The graph is always shown **from your team's perspective**. The shaded area changes color depending on which team is currently favored, regardless of whether you are playing Blue or Red side.
-
-For a lightweight terminal version:
-
-```bash
-python live_predict.py
-```
-
-> The live pipeline works in **any game mode** (Ranked, Normal, Custom, Practice Tool, etc.). However, the model was trained exclusively on Ranked Solo Queue matches, so probabilities outside that distribution should not be interpreted literally.
-
-## Training Your Own Model
-
-```bash
-python crawler.py
-python build_features.py
-python train.py
-```
-
-The crawler requires **several hours** to collect around 10,000 matches because every game requires downloading both the match metadata and its timeline, while Riot development keys have strict rate limits.
-
-Development keys also **expire every 24 hours**. If you receive a 401 error, generate a new key and restart the crawler—it automatically resumes where it left off.
-
-The target region and ranked tiers can be modified through the constants defined at the beginning of `crawler.py` (`SEED_TIERS`, `PLATFORM`, and `REGION`).
-
-## Tests
-
-The pipeline's core logic (feature extraction, dataset filtering, live-state
-parsing, calibration metrics) has a unit test suite that runs with no API key,
-no dataset and no running game:
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
-## Experiments
-
-```bash
-python -m experiments.calibrate
-python -m experiments.queue_ablation
-python -m experiments.train_lstm
-```
-
-Included experiments evaluate:
-
-- Whether probability calibration improves performance (it does not)
-- The effect of training with game modes other than Solo Queue
-- Whether sequential models (LSTM) outperform gradient boosting (they do not)
+| Metric                           | Value                                                     |
+| :------------------------------- | :-------------------------------------------------------- |
+| ECE (Expected Calibration Error) | 1.1%                                                      |
+| ROC-AUC                          | 0.836 (not a 0.95+ due to game randomness)                |
+| Dataset                          | 7,956 Solo Queue matches / 186,635 minute snapshots (EUW) |
+| Model                            | Gradient Boosting Classifier                              |
 
 ## Pipeline
 
-```text
-Riot API  ──crawler.py──>  matches/ + timelines/
-                                 │
-                                 v
-                        build_features.py
-                                 │
-                                 v
-                           features.csv
-                                 │
-                                 v
-                            train.py
-                                 │
-                                 v
-                    models/model_baseline.joblib
+1. Data Collection: `crawler.py` downloads match metadata and timelines from the Riot API.
+2. Feature Engineering: `build_features.py` converts timelines into `features.csv` (one row per minute).
+3. Training: `train.py` trains, evaluates, and exports the model to `src/models/baseline_model.joblib`.
+4. Live Prediction: `live_predict.py` reads the local client API and queries the FastAPI service every 10 seconds.
 
-League Client
-Live Client Data API
-        │
-        v
- live_predict.py
-        │
-        v
- Live win probability every 10 seconds
+Training is performed exclusively from the match timeline to prevent target leakage. The model intentionally uses only features available through the Live Client API.
+
+## Quick Start
+
+### Option 1: Docker (Recommended)
+
+The project includes a fully configured Docker environment. No local Python setup is required.
+
+```bash
+git clone https://github.com/pabloChantada/LeaguePredictor.git
+cd LeaguePredictor
+docker compose up -d --build
 ```
 
-Training is performed exclusively from the **match timeline**, not from Riot's final match summary.
+Once running, open `http://localhost:8501` in your browser to see the live dashboard.
 
-Using the final match statistics would introduce target leakage, since those statistics already contain information about the game's outcome.
+### Option 2: Local Development (with uv)
 
-Each timeline is converted into one training sample per game minute.
+This project uses `uv` for dependency management.
 
-The model intentionally uses **only features available through the Live Client API**. Although the timeline contains additional information such as total gold and experience, these values are unavailable for every player during live matches.
+```bash
+git clone https://github.com/pabloChantada/LeaguePredictor.git
+cd LeaguePredictor
 
-Using them would produce a model that cannot be deployed in real time.
+# Install dependencies and create virtual environment
+uv sync
 
-Interestingly, excluding gold only reduces ROC-AUC by approximately **0.002**, since gold is already highly correlated with CS, kills, and objective control.
+# Run the live dashboard
+uv run streamlit run src/serve/live_dashboard.py
+```
 
-| File | Purpose |
-|---|---|
-| `crawler.py` | Downloads match metadata and timelines (resume supported). |
-| `build_features.py` | Converts timelines into `features.csv` (one row per minute). |
-| `train.py` | Trains, evaluates, and exports the model. |
-| `live_predict.py` | Core prediction engine and terminal interface. |
-| `live_dashboard.py` | Streamlit dashboard. |
-| `experiments/` | Experimental models and ablation studies. |
-| `notebooks/eda.ipynb` | Exploratory data analysis. |
+For a lightweight terminal-only version, run `uv run python src/serve/live_predict.py`.
 
-All commands should be executed from the repository root.
+## Training Your Own Model
 
-## Calibration
+If you want to retrain the model on a different region or rank, you will need a Riot Games API key.
 
-Evaluation was performed on **37,320 unseen samples**, using a **match-level split** to prevent information leakage between training and testing.
+1. Configure API Key:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your API_KEY from https://developer.riotgames.com/
+   ```
+2. Crawl Data (Note: Dev keys expire every 24h. The crawler supports resuming):
+   ```bash
+   uv run python src/building/crawler.py
+   ```
+3. Build Features:
+   ```bash
+   uv run python src/building/build_features.py
+   ```
+4. Train and Evaluate:
+   ```bash
+   uv run python src/building/train.py
+   ```
 
-| Predicted | Observed | Samples |
-|---:|---:|---:|
-| 5.1% | 4.4% | 5,057 |
-| 14.8% | 14.7% | 3,666 |
-| 25.1% | 28.5% | 3,701 |
-| 35.0% | 35.7% | 4,234 |
-| 44.9% | 46.4% | 3,880 |
-| 55.0% | 54.3% | 3,634 |
-| 64.9% | 64.9% | 3,408 |
-| 74.9% | 74.3% | 3,111 |
-| 85.1% | 84.1% | 3,085 |
-| 94.8% | 95.8% | 3,544 |
+The target region and ranked tiers can be modified via constants in `src/building/crawler.py` (`SEED_TIERS`, `PLATFORM`, `REGION`).
 
-The model is naturally well calibrated.
+## Testing
 
-Applying **Isotonic Regression** or **Platt Scaling** actually degrades calibration (ECE increases from **1.1%** to approximately **2.2%**), so no post-processing calibration is applied.
+The pipeline's core logic (feature extraction, dataset filtering, live-state parsing, and API routing) has a comprehensive unit test suite. It runs with no API key, no dataset, and no running game using extensive mocking.
+
+```bash
+# Run tests with coverage report
+uv run pytest -q --cov=src.building --cov=src.serve --cov-report=term-missing
+```
+
+Coverage reports are automatically uploaded to Codecov via GitHub Actions on every push.
 
 ## Limitations
 
-- **Designed for Ranked Solo Queue (5v5) only.** ARAM, Arena, Co-op vs AI, and other game modes follow different dynamics, objectives, and maps, making the probabilities unreliable.
-- **Rank matters.** The current model was trained on high-elo matches. Lower-ranked games tend to convert advantages less consistently, meaning probabilities become overconfident when deployed outside the training distribution. Retraining with your target rank (`SEED_TIERS`) is recommended.
-- **There is an upper performance limit.** A ROC-AUC around **0.84** reflects the inherent uncertainty of League of Legends rather than a limitation of the algorithm. Additional data, hyperparameter tuning, LightGBM, and LSTM models did not significantly improve performance.
-- **Development API keys expire every 24 hours.** This only affects data collection. Live prediction relies exclusively on Riot's local client API.
+- Designed for Ranked Solo Queue (5v5) only. ARAM, Arena, Co-op vs AI, and other game modes follow different dynamics, making probabilities a bit unreliable.
+- Rank matters. The current model was trained on mid-to-high elo matches. Lower-ranked games tend to convert advantages less consistently, meaning probabilities can become overconfident outside the training distribution.
+- Upper performance limit. A ROC-AUC around 0.84 reflects the inherent uncertainty of League of Legends. Extensive experiments with LSTMs, LightGBM, and hyperparameter tuning did not yield significant improvements over Gradient Boosting.
+- Development API keys expire every 24 hours. This only affects data collection. Live prediction relies exclusively on Riot's local client API.
 
-## Acknowledgements
+## Acknowledgements and Disclaimer
 
-Match data is provided by the **Riot Games API**.
-
-This project is **not endorsed by Riot Games** and does not reflect the views or opinions of Riot Games.
+Match data is provided by the Riot Games API. This project is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games.

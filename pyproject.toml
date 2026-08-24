@@ -1,6 +1,6 @@
 [project]
 name = "leaguepredictor"
-version = "0.1.0"
+version = "1.1.0"
 description = "A model to predict the probability of winning in League of Legends in a live match."
 readme = "README.md"
 authors = [
@@ -35,4 +35,5 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--ignore=src/building/config.py"
+pythonpath = ["."]
+addopts = "-q --cov=src.building --cov=src.serve --cov-report=term-missing --cov-report=xml"

@@ -13,3 +13,6 @@ models/*.pt
 # mode needs no API key, so with this the repo works right after cloning.
 !models/baseline_model.joblib
 .env
+.coverage
+coverage.xml
+.devcontainer/
