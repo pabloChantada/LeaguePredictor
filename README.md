@@ -1,10 +1,10 @@
 # League of Legends Live Win Predictor
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
-![Codecov](https://codecov.io/gh/pabloChantada/LeaguePredictor/branch/main/graph/badge.svg)
+[![Codecov](https://codecov.io/gh/pabloChantada/LeaguePredictor/branch/main/graph/badge.svg)](https://codecov.io/gh/pabloChantada/LeaguePredictor)
 [![Tests](https://github.com/pabloChantada/LeaguePredictor/actions/workflows/ci.yaml/badge.svg)](https://github.com/pabloChantada/LeaguePredictor/actions/workflows/ci.yaml)
-![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)
-![Render](<https://img.shields.io/badge/Deployed%20on-Render-000000?style=flat&logo=render>)
+[![Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://chantaclown-leaguepredictor.streamlit.app/)
+[![Render](https://img.shields.io/badge/Deployed%20on-Render-000000?style=flat&logo=render)](https://league-of-legends-win-predictor.onrender.com)
 
 Real-time League of Legends win probability, updated every minute of the game.
 

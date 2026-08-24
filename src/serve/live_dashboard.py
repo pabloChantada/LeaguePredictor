@@ -12,6 +12,8 @@ match runs ON THIS PC. Note: the model was trained on high-elo soloQ 5v5.
 """
 import copy
 import os
+from pathlib import Path
+import sys
 import time
 import json
 import glob
@@ -20,7 +22,18 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from . import live_predict as lp
+# i know it's a bit shit but it's only here and not really important so
+# for Streamlit Cloud
+if __name__ == "__main__":
+    src_path = Path(__file__).parent.parent
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+try:
+    # Try relative import first (works in tests)
+    from . import live_predict as lp
+except ImportError:
+    # Fall back to absolute import (works in Streamlit)
+    import live_predict as lp
 
 st.set_page_config(page_title="LoL Win Probability", layout="wide")
 
