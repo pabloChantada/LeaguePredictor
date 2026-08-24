@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-import src.serve.live_predict as lp
+import live_predict as lp
 
 st.set_page_config(page_title="LoL Win Probability", layout="wide")
 
