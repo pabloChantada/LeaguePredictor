@@ -6,8 +6,11 @@ process only ever sees a feature vector already computed by the client and
 POSTed to it. It never calls the Riot Live Client Data API itself. 
 """
 from contextlib import asynccontextmanager
+import sentry_sdk
 import joblib
+import os
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 # Plain constants here, not importing src/building/config.py
@@ -35,11 +38,27 @@ async def lifespan(app: FastAPI):
     # Cleanup after the app shuts down
     ml_models.clear()
 
+
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    traces_sample_rate=1.0,
+)
+
+
 app = FastAPI(
     title="League of Legends Win Predictor",
     description="Predicts blue-side win probability from live in-game features.",
     version="1.0.0",
     lifespan=lifespan, # Use the lifespan context manager to load the model at startup and clean up at shutdown
+)
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # En producción, cambia "*" por la URL de tu Streamlit Cloud
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Pydantic models for request and response validation
@@ -69,7 +88,6 @@ class PredictionResponse(BaseModel):
 @app.get("/health", tags=["ops"])
 async def health():
     return {"status": "ok", "model_loaded": "model" in ml_models}
-
 
 @app.post("/predict", response_model=PredictionResponse, tags=["predictions"])
 async def get_prediction(state: GameState):

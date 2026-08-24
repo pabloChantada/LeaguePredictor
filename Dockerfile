@@ -14,8 +14,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY src ./src
 
-EXPOSE 8000 8501
+EXPOSE 8000
 
 CMD ["bash", "-c", \
-    "uv run uvicorn src.serve.app:app --host 0.0.0.0 --port 8000 & \
-     uv run streamlit run src/serve/live_dashboard.py --server.address 0.0.0.0 --server.port 8501"]
+    "uv run uvicorn src.serve.app:app --host 0.0.0.0 --port ${PORT:-8000}"]

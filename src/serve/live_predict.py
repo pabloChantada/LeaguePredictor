@@ -21,7 +21,8 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 LIVE_CLIENT_URL = "https://host.docker.internal:2999/liveclientdata/allgamedata"
-PREDICT_API_URL = "http://host.docker.internal:8000/predict"
+base_url = os.getenv("API_URL", "http://host.docker.internal:8000")
+PREDICT_API_URL = f"{base_url}/predict"
 LIVE_TIMEOUT = 3
 
 # Generous on purpose: Render/Fly free tier can cold-start a sleeping service

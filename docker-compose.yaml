@@ -1,14 +1,26 @@
 services:
-  league_predictor:
+  api:
     build: .
-    container_name: league_predictor
+    container_name: api
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - RIOT_API_KEY=${RIOT_API_KEY}
+
+  dashboard:
+    build: .
+    container_name: dashboard
+    command: uv run streamlit run src/serve/live_dashboard.py --server.address 0.0.0.0 --server.port ${DASHBOARD_PORT:-8501}
+    ports: 
       - "8501:8501"
     volumes: # can be removed in prod
       - ./src:/app/src
       - ./.env:/app/.env
     environment:
-      - RIOT_API_KEY=${RIOT_API_KEY}
+      - API_URL=http://api:8000  # local
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - api

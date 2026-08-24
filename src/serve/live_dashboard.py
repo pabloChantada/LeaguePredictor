@@ -10,6 +10,7 @@ progresses. live_predict.predict_blue_winrate does an HTTP call to the FastAPI s
 Works in any mode (ranked, normal, CUSTOM, practice tool) as long as the
 match runs ON THIS PC. Note: the model was trained on high-elo soloQ 5v5.
 """
+import os
 import time
 
 import matplotlib.pyplot as plt
