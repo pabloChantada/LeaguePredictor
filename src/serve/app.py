@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
 
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_DSN"),
+    send_default_pii=True,
     traces_sample_rate=1.0,
 )
 
@@ -83,7 +84,10 @@ class PredictionResponse(BaseModel):
     p_blue: float
     p_red: float
 
-
+@app.get("/sentry-debug")
+async def trigger_error():
+    division_by_zero = 1 / 0
+    
 # Health endpoint for live deployment
 @app.get("/health", tags=["ops"])
 async def health():

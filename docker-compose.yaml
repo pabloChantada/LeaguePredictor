@@ -8,6 +8,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - RIOT_API_KEY=${RIOT_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN}
 
   dashboard:
     build: .
@@ -20,6 +21,7 @@ services:
       - ./.env:/app/.env
     environment:
       - API_URL=http://api:8000  # local
+      - DEMO_MODE=${DEMO_MODE}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
