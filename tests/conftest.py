@@ -1,21 +1,47 @@
-"""Shared fixtures for the test suite.
-
-Nothing here talks to the network or needs a real Riot API key: crawler.py only
-requires one once you actually try to fetch something (see require_api_key()).
-"""
-import os
+# tests/conftest.py
 import sys
 from pathlib import Path
-
 import pytest
+from unittest.mock import MagicMock
 
-ROOT = Path(__file__).resolve().parent.parent
+root_dir = Path(__file__).parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
 
-# add the src/ and src/building/ directories to sys.path so that tests can import from them
-for target_dir in [ROOT, ROOT / "src" / "building", ROOT / "src" / "serve"]:
-    if str(target_dir) not in sys.path:
-        sys.path.insert(0, str(target_dir))
+mock_config = MagicMock()
+mock_config.API_KEY = "fake_key"
+mock_config.PLATFORM = "https://fake.api.riotgames.com"
+mock_config.REGION = "https://fake.api.riotgames.com"
+mock_config.QUEUE = "RANKED_SOLO_5x5"
+mock_config.QUEUE_ID = 420
+mock_config.WINDOW_SECONDS = 10
+mock_config.MAX_PER_WINDOW = 20
+mock_config.MAX_PER_SECOND = 2
+mock_config.MINUTE_START = 5
+mock_config.MINUTE_STEP = 1
+mock_config.DELTA_WINDOW = 5
+mock_config.FEATURES = [
+    "minute",
+    "kills_diff", "cs_diff", "level_diff",
+    "tower_diff", "inhib_diff", "dragon_diff", "herald_diff", "baron_diff", "grub_diff",
+    "kills_diff_d5", "cs_diff_d5", "level_diff_d5",
+]
+mock_config.TARGET = "blue_win"
+mock_config.DELTA_BASE = ["gold_diff", "xp_diff", "kills_diff", "cs_diff", "level_diff"]
+mock_config.RAW_DIR = "./fake_raw"
+mock_config.TIMELINE_DIR = "./fake_timeline"
+mock_config.FEATURES_CSV = "./fake_features.csv"
+mock_config.RANKS_CSV = "./fake_ranks.csv"
+mock_config.OUT_DIR = "./fake_out"
+mock_config.TARGET_MATCHES = 100
+mock_config.MATCHES_PER_PLAYER = 20
+mock_config.SEED_PAGES_PER_DIVISION = 1
+mock_config.SEED_MAX_PER_TIER = 100
+mock_config.SEED_TIERS = {"DIAMOND": ["I", "II"]}
 
+sys.modules['config'] = mock_config
+
+sys.modules['crawler'] = MagicMock()
 
 @pytest.fixture(autouse=True)
 def _no_real_api_key(monkeypatch):

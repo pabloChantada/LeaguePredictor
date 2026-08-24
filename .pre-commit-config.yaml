@@ -4,6 +4,7 @@
 # pip install pre-commit
 # pre-commit install
 
+# using uv doesn't work with pre-commit, but it's not really a provlem tbf
 repos:
   - repo: local
     hooks:
