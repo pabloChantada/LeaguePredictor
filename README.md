@@ -10,7 +10,7 @@ Real-time League of Legends win probability, updated every minute of the game.
 
 Reads the currently running match through Riot's Live Client Data API and estimates the team's probability of winning. Nothing is injected into the game and no memory is modified; the application only reads the local API already exposed by the League of Legends client.
 
-<video src="docs/dashboard_video.mp4" controls width="100%"></video>
+https://github.com/user-attachments/assets/c748e293-6b4a-4716-9889-78b9d1e2cd54
 
 ## Live Demos and Monitoring
 
