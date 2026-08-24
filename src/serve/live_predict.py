@@ -29,7 +29,7 @@ LIVE_TIMEOUT = 3
 # in 20-50s, and that's normal, not a failure.
 PREDICT_TIMEOUT = 30
 
-POLL_SECONDS = 10
+POLL_SECONDS = 5
 DELTA_WINDOW = 5  # minutesbuild_features.DELTA_WINDOW
 NEW_GAME_TOLERANCE = 5.0  # seconds; covers gameTime float jitter, not real resets
 

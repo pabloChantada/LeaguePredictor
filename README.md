@@ -44,7 +44,7 @@ The goal is to produce well-calibrated probabilities. Whenever the model predict
 1. Data Collection: `crawler.py` downloads match metadata and timelines from the Riot API.
 2. Feature Engineering: `build_features.py` converts timelines into `features.csv` (one row per minute).
 3. Training: `train.py` trains, evaluates, and exports the model to `src/models/baseline_model.joblib`.
-4. Live Prediction: `live_predict.py` reads the local client API and queries the FastAPI service every 10 seconds.
+4. Live Prediction: `live_predict.py` reads the local client API and queries the FastAPI service every 5 seconds.
 
 Training is performed exclusively from the match timeline to prevent target leakage. The model intentionally uses only features available through the Live Client API.
 
@@ -60,7 +60,8 @@ cd LeaguePredictor
 docker compose up -d --build
 ```
 
-Once running, open `http://localhost:8501` in your browser to see the live dashboard.
+Once running, open `http://localhost:8501` in your browser to see the live dashboard. No deployment is used; 
+the dashboard runs locally and reads the Riot client API directly.
 
 ### Option 2: Local Development (with uv)
 
@@ -120,7 +121,7 @@ Coverage reports are automatically uploaded to Codecov via GitHub Actions on eve
 - Rank matters. The current model was trained on mid-to-high elo matches. Lower-ranked games tend to convert advantages less consistently, meaning probabilities can become overconfident outside the training distribution.
 - Upper performance limit. A ROC-AUC around 0.84 reflects the inherent uncertainty of League of Legends. Extensive experiments with LSTMs, LightGBM, and hyperparameter tuning did not yield significant improvements over Gradient Boosting.
 - Development API keys expire every 24 hours. This only affects data collection. Live prediction relies exclusively on Riot's local client API.
-
+- The demo dashboard has a cold start. The first prediction may take 20-50 seconds, which is normal and not a failure. Since we are using a free tier of Render. 
 ## Acknowledgements and Disclaimer
 
 Match data is provided by the Riot Games API. This project is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games.
